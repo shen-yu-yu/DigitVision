@@ -1,0 +1,15 @@
+model:
+  name: DigitClassifier
+  path: ./checkpoints/digit_model.pth
+
+train:
+  batch_size: 64
+  lr: 0.01
+  epochs: 10
+
+test:
+  batch_size: 64
+
+
+data:
+  root: ./data
