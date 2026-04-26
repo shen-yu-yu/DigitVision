@@ -5,7 +5,7 @@ model:
 train:
   batch_size: 64
   lr: 0.01
-  epochs: 10
+  epochs: 5
 
 test:
   batch_size: 64

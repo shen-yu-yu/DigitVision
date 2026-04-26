@@ -3,50 +3,88 @@ import torch
 import torchvision.datasets as dataset
 import torchvision.transforms as transforms
 import torch.utils.data as data_utils
-from utils.config import load_yaml
 
+from model.digit_classifier import DigitClassifier
+from utils.config import load_yaml
+from utils.engine import eval_step
+
+# ======================
+# 1. 读取配置
+# ======================
 config = load_yaml("./configs/config.yaml")
+
 batch_size = config["test"]["batch_size"]
 model_path = config["model"]["path"]
 data_root = config["data"]["root"]
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# ======================
+# 2. 数据集
+# ======================
 test_data = dataset.MNIST(
-    root = data_root,
-    train = False,
-    transform = transforms.ToTensor(),
-    download = True
+    root=data_root,
+    train=False,
+    transform=transforms.ToTensor(),
+    download=True
 )
 
-test_loader = data_utils.DataLoader(dataset=test_data, batch_size=batch_size, shuffle=True)
+test_loader = data_utils.DataLoader(
+    dataset=test_data,
+    batch_size=batch_size,
+    shuffle=False
+)
 
-model = torch.load(model_path, weights_only = False)
+# ======================
+# 3. 加载模型（标准方式）
+# ======================
+model = DigitClassifier().to(device)
+model.load_state_dict(torch.load(model_path, map_location=device))
+model.eval()
 
-loss_test = 0
-right_value = 0
-
+# ======================
+# 4. loss函数
+# ======================
 loss_func = torch.nn.CrossEntropyLoss()
 
-for index, (images, labels) in enumerate(test_loader):  # enumerate 在遍历是同时拿到索引和元素
-    outputs = model(images)
-    _, pred = outputs.max(1)
-    loss_test += loss_func(outputs, labels)
-    right_value += (pred == labels).sum().item()
+# ======================
+# 5. 测试
+# ======================
+loss_test = 0
+correct = 0
 
-    images = images.cpu().numpy()
-    labels = labels.cpu().numpy()
+with torch.no_grad():
+    for images, labels in test_loader:
+        loss_val, correct_value, pred = eval_step(
+            model, images, labels, loss_func, device, True
+        )
+        loss_test += loss_val
+        correct += correct_value
 
-    pred = pred.cpu().numpy()
+        # ======================
+        # 6. 可视化（优化）
+        # ======================
+        images_np = images.cpu().numpy()
+        labels_np = labels.cpu().numpy()
+        pred_np = pred.cpu().numpy()
 
-    for idx in range(images.shape[0]):
-        im_data = images[idx].transpose(1, 2, 0)
-        im_label = labels[idx]
-        im_pred = pred[idx]
-        print("预测值为:{}".format(im_pred))
-        print("真实值为:{}".format(im_label))
-        cv2.namedWindow("img", cv2.WINDOW_NORMAL)
-        cv2.imshow("img", im_data)
-        cv2.waitKey(0)
+        for i in range(images_np.shape[0]):
+            img = images_np[i].transpose(1, 2, 0)
+            img = cv2.resize(img, (200, 200))  # 放大显示
 
-print("loss为{}, 准确率为:{}".format(loss_test, right_value / len(test_data)))
+            print(f"预测: {pred_np[i]}  真实: {labels_np[i]}")
 
+            cv2.imshow("MNIST", img)
+            if cv2.waitKey(0) & 0xFF == 27:  # ESC退出
+                break
 
+# ======================
+# 7. 输出结果
+# ======================
+avg_loss = loss_test / len(test_loader)
+acc = correct / len(test_data)
+
+print(f"Test Loss: {avg_loss:.4f}")
+print(f"Accuracy: {acc:.4f}")
+
+cv2.destroyAllWindows()

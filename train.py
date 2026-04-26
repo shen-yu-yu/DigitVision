@@ -1,72 +1,96 @@
+import torch
 import torchvision.transforms as transforms
 import torchvision.datasets as dataset
 import torch.utils.data as data_utils
-import torch
+
 from model.digit_classifier import DigitClassifier
 from utils.config import load_yaml
+from utils.engine import eval_step
 
+# ======================
+# 1. 读取配置
+# ======================
 config = load_yaml("./configs/config.yaml")
+
 batch_size = config["train"]["batch_size"]
 lr = config["train"]["lr"]
 epochs = config["train"]["epochs"]
 model_path = config["model"]["path"]
 data_root = config["data"]["root"]
-# 数据加载
-# 训练集
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# ======================
+# 2. 数据集
+# ======================
 train_data = dataset.MNIST(
-    root = data_root,
-    train = True,
-    transform = transforms.ToTensor(),
-    download = True
+    root=data_root,
+    train=True,
+    transform=transforms.ToTensor(),
+    download=True
 )
-# 测试集
+
 test_data = dataset.MNIST(
-    root = data_root,
-    train = False,
-    transform = transforms.ToTensor(),
-    download = True
+    root=data_root,
+    train=False,
+    transform=transforms.ToTensor(),
+    download=True
 )
 
-# print(train_data)
-# print(test_data)
+train_loader = data_utils.DataLoader(train_data, batch_size=batch_size, shuffle=True)
+test_loader = data_utils.DataLoader(test_data, batch_size=batch_size, shuffle=False)
 
-# 分批加载数据
-train_loader = data_utils.DataLoader(dataset=train_data, batch_size=batch_size, shuffle=True)
-test_loader = data_utils.DataLoader(dataset=test_data, batch_size=batch_size, shuffle=True)
+# ======================
+# 3. 模型
+# ======================
+model = DigitClassifier().to(device)
 
-# print(len(train_loader))
-# print(len(test_loader))
-model = DigitClassifier()
-
-# cnn = cnn.cuda()
-# 损失函数
 loss_func = torch.nn.CrossEntropyLoss()
-#优化函数
 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
-# epoch 通常指一次训练数据全部训练一遍
+# ======================
+# 4. 训练
+# ======================
 for epoch in range(epochs):
-    for index, (images, labels) in enumerate(train_loader):  # enumerate 在遍历是同时拿到索引和元素
-        # print(images)
-        # print(labels)
-        # 前向传播
+    model.train()
+
+    total_loss = 0
+
+    for i, (images, labels) in enumerate(train_loader):
+        images, labels = images.to(device), labels.to(device)
+
         outputs = model(images)
-        # 传入输出层节点和真实标签来计算损失函数
         loss = loss_func(outputs, labels)
-        # 清空梯度
+
         optimizer.zero_grad()
-        # 反向传播
         loss.backward()
         optimizer.step()
-        print("当前为第{}轮,当前批次为:{}/{}, loss为:{}".format(epoch + 1, index + 1, len(train_loader), loss.item()))
-    # 测试集验证
-    loss_test = 0
-    right_value = 0
-    for index, (images, labels) in enumerate(test_loader):
-        outputs = model(images)
-        loss_test += loss_func(outputs, labels)
-        _, pred = outputs.max(1)
-        right_value += (pred == labels).sum().item()
-        print("当前为第{}轮测试集验证，当前批次为{}/{}, loss为{}, 准确率为:{}".format(epoch + 1, index + 1, len(test_loader) // 64, loss_test, right_value / len(test_data)))
 
-torch.save(model, model_path)
+        total_loss += loss.item()
+
+    print(f"Epoch [{epoch+1}/{epochs}] Train Loss: {total_loss / len(train_loader):.4f}")
+
+    # ======================
+    # 5. 测试
+    # ======================
+    model.eval()
+
+    test_loss = 0
+    correct = 0
+
+    with torch.no_grad():
+        for images, labels in test_loader:
+            loss_val, correct_val = eval_step(
+                model, images, labels, loss_func, device
+            )
+            test_loss += loss_val
+            correct += correct_val
+
+    acc = correct / len(test_data)
+
+    print(f"Test Loss: {test_loss / len(test_loader):.4f}, Accuracy: {acc:.4f}")
+
+# ======================
+# 6. 保存模型
+# ======================
+torch.save(model.state_dict(), model_path)
